@@ -1,0 +1,32 @@
+# تنظیمات استقرار روی Render (رایگان)
+# ====================================
+# از Cron Service به جای Worker استفاده می‌شود.
+# Cron Service در پلن رایگان هر دقیقه اجرا می‌شود و خاموش نمی‌شود.
+
+services:
+  - type: cron
+    name: iran-news-bot
+    runtime: python
+    plan: free                    # پلن رایگان - همیشه فعال
+    region: frankfurt             # نزدیک‌تر به ایران
+    schedule: "*/5 * * * *"       # هر ۵ دقیقه اجرا شود
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py --once
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.6
+      # کلیدها را از پنل Render (Environment) تنظیم کنید:
+      # - TELEGRAM_BOT_TOKEN
+      # - TELEGRAM_CHANNEL_ID
+      # - MAX_NEWS_PER_CYCLE=3
+      # - REGULAR_CHECK_INTERVAL_MINUTES=30
+      # - BREAKING_CHECK_INTERVAL_MINUTES=5
+      # - MAX_NEWS_AGE_HOURS=6
+      # - MIN_SECONDS_BETWEEN_SENDS=20
+      - key: DB_PATH
+        value: /data/news_bot.db
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
