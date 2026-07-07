@@ -7,13 +7,14 @@
   3. تولید خلاصه فارسی جذاب برای تلگرام
   4. تشخیص خبر فوری (Breaking News)
 
-استفاده می‌کند.
-
-مدل: gemini-1.5-flash (رایگان، سریع، محدودیت 15 درخواست/دقیقه)
+سیستم چرخش کلیدها (Round-Robin):
+  - چندین کلید API پشتیبانی می‌شود
+  - هر کلید 20 درخواست در روز مجاز است
+  - اگر کلیدی لیمیت بخورد، خودکار به بعدی می‌رود
+  - کلیدهای تمام‌شده روز بعد ریست می‌شوند
 
 تاب‌آوری:
-  - اگر Gemini از کار افتاد یا خطا داد، به فیلتر کلمات کلیدی برمی‌گردد
-  - همه خطاها لاگ می‌شوند ولی ربات متوقف نمی‌شود
+  - اگر همه کلیدها لیمیت بخورن، به فیلتر کلمات کلیدی + ترجمه رایگان برمی‌گرده
 """
 import json
 import logging
@@ -21,11 +22,83 @@ import time
 from dataclasses import dataclass
 
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 
 from config import Config
 from rss_parser import NewsItem
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# مدیریت چند کلید API (Round-Robin)
+# ============================================================
+class KeyManager:
+    """مدیریت چرخش بین چندین کلید API Gemini.
+    هر کلید 20 درخواست در روز مجاز است.
+    اگر کلیدی لیمیت بخورد، تا روز بعد غیرفعال می‌شود."""
+
+    def __init__(self, keys: list[str]):
+        self.keys = [k for k in keys if k]
+        # وضعیت هر کلید: (فعال؟, زمان ریست)
+        self.disabled_until: dict[int, float] = {}
+        self._current_index = 0
+
+    @property
+    def total_keys(self) -> int:
+        return len(self.keys)
+
+    @property
+    def active_keys_count(self) -> int:
+        now = time.time()
+        return sum(1 for i in range(len(self.keys))
+                   if i not in self.disabled_until or self.disabled_until[i] < now)
+
+    def get_next_key(self) -> str | None:
+        """کلید بعدی فعال را برمی‌گرداند (Round-Robin).
+        اگر همه غیرفعال باشند، None برمی‌گرداند."""
+        if not self.keys:
+            return None
+
+        now = time.time()
+        # پاک‌سازی کلیدهایی که زمان غیرفعالیشون تموم شده
+        expired = [i for i, t in self.disabled_until.items() if t < now]
+        for i in expired:
+            del self.disabled_until[i]
+
+        # پیدا کردن کلید فعال بعدی
+        for _ in range(len(self.keys)):
+            idx = self._current_index % len(self.keys)
+            self._current_index += 1
+            if idx not in self.disabled_until:
+                return self.keys[idx]
+
+        # همه غیرفعالند
+        return None
+
+    def disable_key(self, key: str, seconds: int = 86400) -> None:
+        """یک کلید را تا seconds ثانیه غیرفعال می‌کند (پیش‌فرض: 24 ساعت)."""
+        try:
+            idx = self.keys.index(key)
+            self.disabled_until[idx] = time.time() + seconds
+            logger.warning(
+                f"🔑 کلید {idx+1}/{len(self.keys)} تا {seconds//3600} ساعت غیرفعال شد "
+                f"({self.active_keys_count} کلید فعال باقی مانده)"
+            )
+        except ValueError:
+            pass
+
+
+# نمونه سراسری KeyManager
+_key_manager: KeyManager | None = None
+
+
+def _get_key_manager() -> KeyManager:
+    global _key_manager
+    if _key_manager is None:
+        _key_manager = KeyManager(Config.GEMINI_API_KEYS)
+        logger.info(f"🔑 مدیریت کلیدها راه‌اندازی شد: {len(Config.GEMINI_API_KEYS)} کلید")
+    return _key_manager
 
 
 # ============================================================

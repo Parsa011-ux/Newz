@@ -18,7 +18,16 @@ class Config:
     TELEGRAM_CHANNEL_ID: str = os.getenv("TELEGRAM_CHANNEL_ID", "")
 
     # --- هوش مصنوعی Gemini ---
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    # پشتیبانی از چند کلید API برای افزایش سهمیه روزانه (هر کلید = 20 درخواست/روز)
+    # کلیدها را با کاما جدا کنید: GEMINI_API_KEYS=key1,key2,key3
+    # برای سازگاری با نسخه قدیمی، GEMINI_API_KEY هم پشتیبانی می‌شود
+    GEMINI_API_KEYS: list[str] = [
+        k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",")
+        if k.strip()
+    ] or [
+        k.strip() for k in os.getenv("GEMINI_API_KEY", "").split(",")
+        if k.strip()
+    ]
     GEMINI_MODEL: str = "gemini-2.5-flash"  # مدل رایگان و سریع (نسخه جدید)
 
     # --- رفتار ربات ---
@@ -74,8 +83,8 @@ class Config:
             errors.append("TELEGRAM_BOT_TOKEN تنظیم نشده است.")
         if not cls.TELEGRAM_CHANNEL_ID:
             errors.append("TELEGRAM_CHANNEL_ID تنظیم نشده است.")
-        if not cls.GEMINI_API_KEY:
-            errors.append("GEMINI_API_KEY تنظیم نشده است.")
+        if not cls.GEMINI_API_KEYS:
+            errors.append("GEMINI_API_KEYS (یا GEMINI_API_KEY) تنظیم نشده است.")
         return errors
 
 

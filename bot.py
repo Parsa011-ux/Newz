@@ -8,8 +8,8 @@
 
 همچنین در صورت خطا، ربات متوقف نمی‌شود (تاب‌آور).
 """
-import asyncio
 import logging
+import random
 import signal
 import sys
 import time
@@ -27,7 +27,7 @@ from storage import (
     cleanup_old_news, filter_new_items, get_stats,
     init_db, save_sent_news, set_state, get_state,
 )
-from telegram_sender import get_sender, send_news_sync, send_summary_sync, test_connection
+from telegram_sender import send_news, test_connection
 
 # ============================================================
 # راه‌اندازی لاگ‌گذاری
@@ -60,22 +60,31 @@ def regular_job():
             logger.info("   همه اخبار تکراری بودند")
             return
 
-        # 3. ارزیابی با AI
-        evaluated = filter_and_enhance(new_items, use_batch=True)
-        if not evaluated:
-            logger.info("   خبر مرتبطی یافت نشد")
-            return
+        # 3. ارزیابی اولیه بدون AI (فیلتر + ترجمه رایگان + مرتب‌سازی)
+        from ai_filter import _fallback_evaluation
+        evaluated = [(item, _fallback_evaluation(item)) for item in new_items]
+        # مرتب‌سازی بر اساس اهمیت
+        evaluated.sort(key=lambda x: x[1].importance_score, reverse=True)
 
-        # 4. مرتب‌سازی بر اساس اهمیت (filter_and_enhance این کار را کرده)
-        # انتخاب فقط مهم‌ترین اخبار (حداکثر MAX_NEWS_PER_CYCLE)
+        # 4. انتخاب فقط مهم‌ترین اخبار (حداکثر MAX_NEWS_PER_CYCLE)
         top_news = evaluated[:Config.MAX_NEWS_PER_CYCLE]
 
-        logger.info(f"📤 ارسال {len(top_news)} خبر به کانال...")
+        # 5. ارزیابی نهایی با Gemini فقط برای خبراتی که ارسال می‌شوند (صرفه‌جویی)
+        from ai_filter import evaluate_news
+        ai_evaluated = []
+        for item, fallback_ev in top_news:
+            try:
+                ai_ev = evaluate_news(item)
+                ai_evaluated.append((item, ai_ev))
+            except Exception:
+                ai_evaluated.append((item, fallback_ev))
 
-        # 5. ارسال (با فاصله بین هر پیام)
+        logger.info(f"📤 ارسال {len(ai_evaluated)} خبر به کانال...")
+
+        # 6. ارسال (با فاصله بین هر پیام)
         sent_count = 0
-        for i, (item, ev) in enumerate(top_news):
-            success = send_news_sync(item, ev)
+        for i, (item, ev) in enumerate(ai_evaluated):
+            success = send_news(item, ev)
             if success:
                 save_sent_news(item, Config.DB_PATH, is_breaking=ev.is_breaking)
                 sent_count += 1
@@ -135,10 +144,7 @@ def run_scheduler():
     # تست اتصال تلگرام
     logger.info("🔌 تست اتصال به تلگرام...")
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        connected = loop.run_until_complete(test_connection())
-        loop.close()
+        connected = test_connection()
         if not connected:
             logger.warning("⚠️ اتصال تلگرام برقرار نشد - ادامه می‌دهیم")
         else:

@@ -122,6 +122,9 @@ def fetch_feed(source: Source, timeout: int = 15) -> list[NewsItem]:
                 if not title or not link:
                     continue
 
+                # استخراج منبع واقعی از Google News (به جای "Google News")
+                real_source_name, real_source_fa = _extract_real_source(entry, source)
+
                 # پارس تاریخ انتشار
                 published = _parse_date(entry)
 
@@ -129,8 +132,8 @@ def fetch_feed(source: Source, timeout: int = 15) -> list[NewsItem]:
                     title=title,
                     link=link,
                     summary=summary[:500],  # محدود کردن طول خلاصه
-                    source_name=source.name,
-                    source_name_fa=source.display_name,
+                    source_name=real_source_name,
+                    source_name_fa=real_source_fa,
                     language=source.language,
                     priority=source.priority,
                     published=published,
@@ -168,6 +171,79 @@ def keyword_filter(item: NewsItem) -> bool:
 # ============================================================
 # توابع کمکی
 # ============================================================
+# نگاشت نام منابع انگلیسی به فارسی (برای نمایش در کانال)
+_SOURCE_NAME_FA = {
+    # منابع اصلی
+    "BBC Persian": "بی‌بی‌سی فارسی", "BBC News": "بی‌بی‌سی",
+    "Reuters": "رویترز", "AP News": "آسوشیتدپرس", "AP": "آسوشیتدپرس",
+    "Al Jazeera": "الجزیره", "The Guardian": "گاردین",
+    "Iran International": "ایران اینترنشنال", "Radio Farda": "رادیو فردا",
+    "VOA Persian": "صدای آمریکا", "Deutsche Welle FA": "دویچه وله",
+    "DW": "دویچه وله", "Etemad Online": "اعتماد",
+    # منابع بین‌المللی پرتکرار Google News
+    "WSJ": "وال‌استریت ژورنال", "Wall Street Journal": "وال‌استریت ژورنال",
+    "NYTimes": "نیویورک تایمز", "New York Times": "نیویورک تایمز",
+    "The New York Times": "نیویورک تایمز",
+    "Washington Post": "واشنگتن‌پست", "The Washington Post": "واشنگتن‌پست",
+    "CNN": "سی‌ان‌ان", "Fox News": "فاکس‌نیوز",
+    "Bloomberg": "بلومبرگ", "Financial Times": "فایننشال تایمز",
+    "Times of Israel": "تایمز آو اسرائیل",
+    "Jerusalem Post": "جروزالم پست",
+    "The Times": "تایمز", "The Telegraph": "تلگراف",
+    "TIME": "تایم", "Forbes": "فوربز",
+    "Newsweek": "نیوزویک", "The Hill": "هیل",
+    "Politico": "پلیتیکو", "ABC News": "ای‌بی‌سی نیوز",
+    "CBS News": "سی‌بی‌اس نیوز", "NBC News": "ان‌بی‌سی نیوز",
+    "NPR": "ان‌پی‌آر", "The Economist": "اکونومیست",
+    "Middle East Eye": "میدل ایست آی",
+    "Middle East Monitor": "میدل ایست مانیتور",
+    "Devdiscourse": "دیسکورس",
+    "Tehran Times": "تهران تایمز",
+    "Press TV": "پرس تی‌وی", "Mehr News": "مهر",
+    "Tasnim": "تسنیم", "ISNA": "ایسنا", "IRNA": "ایرنا",
+    "Kayhan": "کیهان", "Entekhab": "انتخاب",
+    "Khaan Press": "خان پرس",
+}
+
+
+def _extract_real_source(entry, source: Source) -> tuple[str, str]:
+    """استخراج منبع واقعی خبر از Google News.
+    Google News در فیلد 'source' اطلاعات منبع اصلی را می‌دهد.
+    خروجی: (نام انگلیسی، نام فارسی)"""
+    # 1. تلاش با فیلد source در entry (روش اصلی Google News)
+    src = entry.get("source")
+    if src and isinstance(src, dict):
+        title = src.get("title", "").strip()
+        if title:
+            return title, _SOURCE_NAME_FA.get(title, title)
+
+    # 2. اگر منبع Google News نیست، از source اصلی فید استفاده کن
+    if "Google News" not in source.name:
+        return source.name, source.display_name
+
+    # 3. تلاش با استخراج از URL منبع
+    href = (src or {}).get("href", "") if src else ""
+    if href:
+        try:
+            from urllib.parse import urlparse
+            domain = urlparse(href).netloc.replace("www.", "")
+            # تبدیل domain به نام نمایشی
+            domain_names = {
+                "reuters.com": "Reuters", "apnews.com": "AP News",
+                "bbc.com": "BBC News", "bbc.co.uk": "BBC News",
+                "aljazeera.com": "Al Jazeera", "theguardian.com": "The Guardian",
+                "wsj.com": "WSJ", "nytimes.com": "New York Times",
+                "washingtonpost.com": "Washington Post", "cnn.com": "CNN",
+                "bloomberg.com": "Bloomberg", "ft.com": "Financial Times",
+            }
+            name = domain_names.get(domain, domain)
+            return name, _SOURCE_NAME_FA.get(name, name)
+        except Exception:
+            pass
+
+    return source.name, source.display_name
+
+
 def _strip_html(text: str) -> str:
     """حذف تگ‌های HTML و entity ها از متن.
     نمونه‌هایی که پاک می‌شوند: <b>...</b>, &nbsp;, &amp;, &#8230; و ..."""

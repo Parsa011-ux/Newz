@@ -25,7 +25,7 @@ from ai_filter import AIEvaluation, filter_and_enhance
 from config import Config
 from rss_parser import NewsItem, fetch_breaking_news
 from storage import filter_new_items, save_sent_news
-from telegram_sender import send_news_sync
+from telegram_sender import send_news
 
 logger = logging.getLogger(__name__)
 
@@ -51,25 +51,37 @@ def process_breaking_news(db_path: str) -> int:
         logger.info("   همه اخبار فوری تکراری بودند")
         return 0
 
-    # 3. ارزیابی با AI
-    evaluated = filter_and_enhance(new_items, use_batch=True)
+    # 3. ارزیابی اولیه بدون AI (فیلتر سریع + مرتب‌سازی)
+    from ai_filter import _fallback_evaluation
+    evaluated = [(item, _fallback_evaluation(item)) for item in new_items]
+    evaluated.sort(key=lambda x: x[1].importance_score, reverse=True)
 
-    # 4. فیلتر فقط اخبار فوری و مهم
-    breaking_items = [
-        (item, ev) for item, ev in evaluated
+    # 4. فیلتر فقط اخبار فوری و مهم (حداکثر ۲ خبر فوری در هر سیکل)
+    candidates = [
+        (item, ev) for item, ev in evaluated[:5]
         if ev.is_breaking and ev.importance_score >= MIN_BREAKING_SCORE
-    ]
+    ][:2]
 
-    if not breaking_items:
+    if not candidates:
         logger.info("   خبر فوری قابل ارسالی وجود ندارد")
         return 0
 
+    # 5. ارزیابی نهایی با Gemini فقط برای خبراتی که ارسال می‌شوند
+    from ai_filter import evaluate_news
+    breaking_items = []
+    for item, fallback_ev in candidates:
+        try:
+            ai_ev = evaluate_news(item)
+            breaking_items.append((item, ai_ev))
+        except Exception:
+            breaking_items.append((item, fallback_ev))
+
     logger.info(f"🔥 {len(breaking_items)} خبر فوری برای ارسال")
 
-    # 5. ارسال هر خبر فوری (با فاصله بین هر پیام)
+    # 6. ارسال هر خبر فوری (با فاصله بین هر پیام)
     sent_count = 0
     for i, (item, ev) in enumerate(breaking_items):
-        success = send_news_sync(item, ev)
+        success = send_news(item, ev)
         if success:
             save_sent_news(item, db_path, is_breaking=True)
             sent_count += 1
