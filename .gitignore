@@ -1,0 +1,46 @@
+# فایل‌های محیطی و کلیدها
+.env
+.env.local
+.env.*.local
+
+# دیتابیس
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+news_bot.db
+
+# پایتون
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# محیط‌های مجازی
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# لاگ‌ها
+*.log
+logs/
+
+# سیستم‌عامل
+Thumbs.db
